@@ -28,5 +28,5 @@ Deezer was chosen for three reasons:
 . Audio Preview Playback.
 
 ## Vercel
-{[text](https://playlist-library.vercel.app/)}
+{(https://playlist-library.vercel.app/)}
 
