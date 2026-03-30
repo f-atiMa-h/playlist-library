@@ -1,16 +1,32 @@
-# React + Vite
+# Playlist Library
+## Project Overview
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Playlist Library is a React single-page application that lets users create named playlists, search for songs via the Deezer API with autocomplete suggestions, add songs to playlists, and play 30-second audio previews. All data is saved automatically using persistent artifact storage, so playlists survive across sessions.
 
-Currently, two official plugins are available:
+The project started as a simple song tracker and evolved into a full playlist management library through a series of deliberate design decisions made during development.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Technology Stack
+### React
+React was chosen as the UI framework because it makes building interactive, stateful interfaces straightforward. Its component model and hooks system (useState, useEffect, useRef) make it easy to manage complex state like playlists, songs, audio playback, and theme switching — all within a single component.
 
-## React Compiler
+### Deezer API
+Deezer was chosen for three reasons:
+. Returns structured data including title, artist name, and duration in seconds — everything needed to populate the form automatically
+. •Returns 30-second audio preview URLs for most tracks — enabling the snippet playback feature.
+. No API key required for basic search.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Artifact Persistent Storage
 
-## Expanding the ESLint configuration
+## Features Built
+. Theme Switching.
+. Stats Bar.
+. Playlist Creation with a Modal.
+. Song Autocomplete.
+. Adding Songs to a Playlist.
+.  Expandable Playlist Cards.
+. Empty States.
+. Audio Preview Playback.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Vercel
+{[text](https://playlist-library.vercel.app/)}
+
