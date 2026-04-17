@@ -3,7 +3,7 @@ import { themes } from './themes';
 import { useState, useEffect, useRef } from 'react';
 
 function Playlist() {
-  //  STATE 
+  // ============ STATE ============
   const [playlists, setPlaylists] = useState([]);
   const [songInput, setSongInput] = useState('');
   const [artistInput, setArtistInput] = useState('');
@@ -17,7 +17,7 @@ function Playlist() {
   const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
   const audioRef = useRef(null);
 
-  //  API CALLS 
+  // ============ API CALLS ============
   const fetchSongs = async (query) => {
     try {
       const res = await fetch(
@@ -31,7 +31,7 @@ function Playlist() {
     }
   };
 
-  //  THEME MANAGEMENT 
+  // ============ THEME MANAGEMENT ============
   const applyTheme = (themeName) => {
     const theme = themes[themeName];
     if (!theme) return;
@@ -44,38 +44,32 @@ function Playlist() {
     applyTheme('midnight');
   }, []);
 
-  //  PERSISTENT STORAGE (window.storage) 
+  // ============ PERSISTENT STORAGE (localStorage) ============
+  // Load playlists on mount
   useEffect(() => {
-    const loadPlaylists = async () => {
-      try {
-        const result = await window.storage.get('playlists');
-        if (result && result.value) {
-          const parsed = JSON.parse(result.value);
-          if (Array.isArray(parsed)) {
-            setPlaylists(parsed);
-          }
+    try {
+      const stored = localStorage.getItem('playlists');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setPlaylists(parsed);
         }
-      } catch (err) {
-        console.error('Failed to load playlists:', err);
       }
-    };
-    loadPlaylists();
+    } catch (err) {
+      console.error('Failed to load playlists:', err);
+    }
   }, []);
 
+  // Save playlists whenever they change
   useEffect(() => {
-    const savePlaylists = async () => {
-      try {
-        await window.storage.set('playlists', JSON.stringify(playlists));
-      } catch (err) {
-        console.error('Failed to save playlists:', err);
-      }
-    };
-    if (playlists.length > 0 || playlists.length === 0) {
-      savePlaylists();
+    try {
+      localStorage.setItem('playlists', JSON.stringify(playlists));
+    } catch (err) {
+      console.error('Failed to save playlists:', err);
     }
   }, [playlists]);
 
-  //  SEARCH & SUGGESTIONS (DEBOUNCED) 
+  // ============ SEARCH & SUGGESTIONS (DEBOUNCED) ============
   useEffect(() => {
     if (songInput.length < 2) {
       setSuggestions([]);
@@ -90,7 +84,7 @@ function Playlist() {
     return () => clearTimeout(delay);
   }, [songInput]);
 
-  //  UTILITY FUNCTIONS 
+  // ============ UTILITY FUNCTIONS ============
   const secondsToMinuteSeconds = (totalSeconds) => {
     const m = Math.floor(totalSeconds / 60);
     const s = totalSeconds % 60;
@@ -106,7 +100,7 @@ function Playlist() {
     return `${s}s`;
   };
 
-  //  STATS (DERIVED FROM STATE) 
+  // ============ STATS (DERIVED FROM STATE) ============
   const totalPlaylists = playlists.length;
 
   const totalSongs = playlists.reduce(
@@ -122,7 +116,7 @@ function Playlist() {
     }, 0);
   }, 0);
 
-  //  SUGGESTION CLICK HANDLER 
+  // ============ SUGGESTION CLICK HANDLER ============
   const handleSuggestionClick = (suggestion) => {
     setSongInput(suggestion.trackName);
     setArtistInput(suggestion.artistName);
@@ -136,7 +130,7 @@ function Playlist() {
     setSuggestions([]);
   };
 
-  //  PLAYLIST CRUD 
+  // ============ PLAYLIST CRUD ============
   const handleCreatePlaylist = () => {
     if (!newPlaylistName.trim()) return;
 
@@ -159,7 +153,7 @@ function Playlist() {
     setExpandedPlaylistId(expandedPlaylistId === id ? null : id);
   };
 
-  //  ADD SONG HANDLER 
+  // ============ ADD SONG HANDLER ============
   const handleAddSong = (e) => {
     e.preventDefault();
 
@@ -187,7 +181,7 @@ function Playlist() {
     setSuggestions([]);
   };
 
-  //  AUDIO PLAYBACK 
+  // ============ AUDIO PLAYBACK ============
   const handlePreview = (song) => {
     if (!song.preview) return;
 
@@ -214,7 +208,7 @@ function Playlist() {
     }
   };
 
-  //  RENDER 
+  // ============ RENDER ============
   return (
     <div className='container'>
       {/* HEADER */}
