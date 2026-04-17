@@ -14,8 +14,29 @@ function Playlist() {
   const [expandedPlaylistId, setExpandedPlaylistId] = useState(null);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
-  const [currentlyPlaying, setCurrentlyPlaying] = useState(null)
+  const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
 
+
+  const fetchDeezerJSONP = (query) => {
+    return new Promise((resolve, reject) => {
+      const callbackName = `deezerCallback_${Date.now()}`;
+
+      window[callbackName] = (data) => {
+        delete window[callbackName];
+        document.body.removeChild(script);
+        resolve(data);
+      };
+
+      const script = document.createElement('script');
+      script.src = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&output=jsonp&callback=${callbackName}`;
+      script.onerror = () => {
+        delete window[callbackName];
+        document.body.removeChild(script);
+        reject(new Error('JSONP request failed'));
+      };
+      document.body.appendChild(script);
+    });
+  };
   // to change the themes
   const applyTheme = (themeName) => {
     const theme = themes[themeName];
@@ -89,16 +110,14 @@ function Playlist() {
 
     const delay = setTimeout(async () => {
       try {
-        const res = await fetch(
-          `https://corsproxy.io/?https://api.deezer.com/search?q=${encodeURIComponent(songInput)}`
-        );
-        const data = await res.json();
-        setSuggestions(data.data.slice(0, 3));// It will suggest the top 3 results
+        const data = await fetchDeezerJSONP(songInput);
+        setSuggestions(data.data.slice(0, 3));
       } catch (err) {
         console.error('Deezer fetch failed:', err);
       }
     }, 400);
-    return () => clearTimeout(delay);  // cleanup. cancels previous timer on each keystroke
+
+    return () => clearTimeout(delay);
   }, [songInput]);
 
   //to convert Deezer's duration, because it comes in seconds
