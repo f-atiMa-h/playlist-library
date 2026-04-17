@@ -3,7 +3,7 @@ import { themes } from './themes';
 import { useState, useEffect, useRef } from 'react';
 
 function Playlist() {
-
+  //  STATE 
   const [playlists, setPlaylists] = useState([]);
   const [songInput, setSongInput] = useState('');
   const [artistInput, setArtistInput] = useState('');
@@ -15,56 +15,88 @@ function Playlist() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
+  const audioRef = useRef(null);
 
-
-  const fetchDeezerJSONP = (query) => {
-    return new Promise((resolve, reject) => {
-      const callbackName = `deezerCallback_${Date.now()}`;
-
-      window[callbackName] = (data) => {
-        delete window[callbackName];
-        document.body.removeChild(script);
-        resolve(data);
-      };
-
-      const script = document.createElement('script');
-      script.src = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&output=jsonp&callback=${callbackName}`;
-      script.onerror = () => {
-        delete window[callbackName];
-        document.body.removeChild(script);
-        reject(new Error('JSONP request failed'));
-      };
-      document.body.appendChild(script);
-    });
+  //  API CALLS 
+  const fetchSongs = async (query) => {
+    try {
+      const res = await fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=5`
+      );
+      const data = await res.json();
+      return data.results || [];
+    } catch (err) {
+      console.error('iTunes fetch failed:', err);
+      return [];
+    }
   };
-  // to change the themes
+
+  //  THEME MANAGEMENT 
   const applyTheme = (themeName) => {
     const theme = themes[themeName];
-    if (theme) {
-      Object.entries(theme).forEach(([key, value]) => {
-        document.documentElement.style.setProperty(key, value);
-      });
-    }
-
-  }
+    if (!theme) return;
+    Object.entries(theme).forEach(([key, value]) => {
+      document.documentElement.style.setProperty(key, value);
+    });
+  };
 
   useEffect(() => {
-    applyTheme('midnight'); // apply midnight theme on load
+    applyTheme('midnight');
   }, []);
 
-  // For the STATS bar
-  const totalPlaylists = playlists.length;
+  //  PERSISTENT STORAGE (window.storage) 
+  useEffect(() => {
+    const loadPlaylists = async () => {
+      try {
+        const result = await window.storage.get('playlists');
+        if (result && result.value) {
+          const parsed = JSON.parse(result.value);
+          if (Array.isArray(parsed)) {
+            setPlaylists(parsed);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load playlists:', err);
+      }
+    };
+    loadPlaylists();
+  }, []);
 
-  const totalSongs = playlists.reduce((sum, pl) => sum + pl.songs.length, 0);
+  useEffect(() => {
+    const savePlaylists = async () => {
+      try {
+        await window.storage.set('playlists', JSON.stringify(playlists));
+      } catch (err) {
+        console.error('Failed to save playlists:', err);
+      }
+    };
+    if (playlists.length > 0 || playlists.length === 0) {
+      savePlaylists();
+    }
+  }, [playlists]);
 
-  const totalSeconds = playlists.reduce((sum, pl) => {
-    return sum + pl.songs.reduce((s, song) => {
-      const [mins, secs] = song.duration.split(':').map(Number);
-      return s + mins * 60 + secs;
-    }, 0);
-  }, 0);
+  //  SEARCH & SUGGESTIONS (DEBOUNCED) 
+  useEffect(() => {
+    if (songInput.length < 2) {
+      setSuggestions([]);
+      return;
+    }
 
-  // Converts total seconds into a readable format e.g 1h 23m 45s
+    const delay = setTimeout(async () => {
+      const data = await fetchSongs(songInput);
+      setSuggestions(data.slice(0, 5));
+    }, 400);
+
+    return () => clearTimeout(delay);
+  }, [songInput]);
+
+  //  UTILITY FUNCTIONS 
+  const secondsToMinuteSeconds = (totalSeconds) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   const formatDuration = (seconds) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -74,74 +106,41 @@ function Playlist() {
     return `${s}s`;
   };
 
-  // Used persistent storage(useEffect) for loading and saving the playlists
+  //  STATS (DERIVED FROM STATE) 
+  const totalPlaylists = playlists.length;
 
-  // Load playlists on mount
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const result = await window.storage.get('playlists');
-        if (result) setPlaylists(JSON.parse(result.value));
-      } catch {
-        setPlaylists([]);
-      }
-    };
-    load();
-  }, []);
+  const totalSongs = playlists.reduce(
+    (sum, pl) => sum + (pl.songs?.length || 0),
+    0
+  );
 
-  // Save playlists whenever they change
-  useEffect(() => {
-    const save = async () => {
-      try {
-        await window.storage.set('playlists', JSON.stringify(playlists));
-      } catch (err) {
-        console.error('Failed to save:', err);
-      }
-    };
-    save();
-  }, [playlists]);
+  const totalSeconds = playlists.reduce((sum, pl) => {
+    return sum + pl.songs.reduce((s, song) => {
+      if (!song.duration || !song.duration.includes(':')) return s;
+      const [mins, secs] = song.duration.split(':').map(Number);
+      return s + (mins * 60 || 0) + (secs || 0);
+    }, 0);
+  }, 0);
 
-  // the debounce(giving suggestions from the API after every keystroke) LOGIC
-  useEffect(() => {
-    if (songInput.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-
-    const delay = setTimeout(async () => {
-      try {
-        const data = await fetchDeezerJSONP(songInput);
-        setSuggestions(data.data.slice(0, 3));
-      } catch (err) {
-        console.error('Deezer fetch failed:', err);
-      }
-    }, 400);
-
-    return () => clearTimeout(delay);
-  }, [songInput]);
-
-  //to convert Deezer's duration, because it comes in seconds
-  const secondsToMinuteSeconds = (totalSeconds) => {
-    const m = Math.floor(totalSeconds / 60);
-    const s = totalSeconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  //when a user clicks the suggestion
+  //  SUGGESTION CLICK HANDLER 
   const handleSuggestionClick = (suggestion) => {
-    setSongInput(suggestion.title);
-    setArtistInput(suggestion.artist.name);
-    setDurationInput(secondsToMinuteSeconds(suggestion.duration));
-    setPreviewUrl(suggestion.preview);
-    setSuggestions([]); // close dropdown
+    setSongInput(suggestion.trackName);
+    setArtistInput(suggestion.artistName);
+    
+    const durationSec = suggestion.trackTimeMillis
+      ? Math.floor(suggestion.trackTimeMillis / 1000)
+      : 0;
+
+    setDurationInput(secondsToMinuteSeconds(durationSec));
+    setPreviewUrl(suggestion.previewUrl || '');
+    setSuggestions([]);
   };
 
-  //  the 'create' playlist logic
+  //  PLAYLIST CRUD 
   const handleCreatePlaylist = () => {
     if (!newPlaylistName.trim()) return;
 
     const newPlaylist = {
-      // a special id(the date when it was created)
       id: Date.now(),
       name: newPlaylistName.trim(),
       songs: []
@@ -150,24 +149,21 @@ function Playlist() {
     setPlaylists([...playlists, newPlaylist]);
     setNewPlaylistName('');
     setShowModal(false);
-  }
+  };
 
-
-  // to delete playlist logic
   const handleDeletePlaylist = (id) => {
     setPlaylists(playlists.filter(pl => pl.id !== id));
   };
 
-  //toggle to expand the card
   const handleToggleExpand = (id) => {
     setExpandedPlaylistId(expandedPlaylistId === id ? null : id);
   };
 
-  // Add to playlist logic
+  //  ADD SONG HANDLER 
   const handleAddSong = (e) => {
     e.preventDefault();
 
-    if (!selectedPlaylistId) return; // no playlist selected
+    if (!selectedPlaylistId) return;
     if (!songInput.trim() || !artistInput.trim() || !durationInput.trim()) return;
 
     const newSong = {
@@ -184,7 +180,6 @@ function Playlist() {
         : pl
     ));
 
-    // clear form after adding
     setSongInput('');
     setArtistInput('');
     setDurationInput('');
@@ -192,40 +187,37 @@ function Playlist() {
     setSuggestions([]);
   };
 
-  //for the audio snippet
-  const audioRef = useRef(null);
-
-  //Play/Stop logic
+  //  AUDIO PLAYBACK 
   const handlePreview = (song) => {
     if (!song.preview) return;
 
     if (currentlyPlaying === song.id) {
-      // already playing — stop it
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
       setCurrentlyPlaying(null);
     } else {
-      // play new song
       if (audioRef.current) {
         audioRef.current.pause();
       }
-      audioRef.current = new Audio(song.preview);
-      audioRef.current.play();
-      setCurrentlyPlaying(song.id);
 
-      // auto-reset when preview ends
-      audioRef.current.onended = () => setCurrentlyPlaying(null);
+      const audio = new Audio(song.preview);
+      audioRef.current = audio;
+
+      audio.play().catch(() => {
+        console.warn('Audio playback failed');
+      });
+
+      setCurrentlyPlaying(song.id);
+      audio.onended = () => setCurrentlyPlaying(null);
     }
   };
 
-
-
+  //  RENDER 
   return (
-
     <div className='container'>
-
       {/* HEADER */}
-
       <div className='header'>
         <div className='header-text'>
           <div className='header-title'>Playlist Library</div>
@@ -239,7 +231,6 @@ function Playlist() {
       </div>
 
       {/* STATS */}
-
       <div className='stats'>
         <div className='stats-card'>
           <div className='stat-card-label'>Total Playlists: </div>
@@ -259,8 +250,7 @@ function Playlist() {
         </div>
       </div>
 
-      {/* ADD SONGS */}
-
+      {/* ADD SONGS FORM */}
       <div className='form-card'>
         <div className='form-title'>Add a Song</div>
         <form onSubmit={handleAddSong}>
@@ -282,8 +272,9 @@ function Playlist() {
             </div>
 
             <div className='input-group' style={{ position: 'relative' }}>
-              <label htmlFor="title">Song Title</label>
+              <label htmlFor="song-title">Song Title</label>
               <input
+                id="song-title"
                 type='text'
                 placeholder='Song name'
                 value={songInput}
@@ -293,9 +284,9 @@ function Playlist() {
               {suggestions.length > 0 && (
                 <ul className='suggestions-dropdown'>
                   {suggestions.map((s) => (
-                    <li key={s.id} onClick={() => handleSuggestionClick(s)}>
-                      <span className='suggestion-title'>{s.title}</span>
-                      <span className='suggestion-artist'>{s.artist.name}</span>
+                    <li key={s.trackId} onClick={() => handleSuggestionClick(s)}>
+                      <span className='suggestion-title'>{s.trackName}</span>
+                      <span className='suggestion-artist'>{s.artistName}</span>
                     </li>
                   ))}
                 </ul>
@@ -303,8 +294,9 @@ function Playlist() {
             </div>
 
             <div className='input-group'>
-              <label htmlFor="artist">Artist name</label>
+              <label htmlFor="artist-name">Artist Name</label>
               <input
+                id="artist-name"
                 type='text'
                 placeholder='Artist name'
                 value={artistInput}
@@ -314,11 +306,9 @@ function Playlist() {
             </div>
 
             <div className='input-group'>
-              <label htmlFor="duration">Song's duration</label>
-              {/*pattern: using regex like a ruleset the value must follow. It should accept 1/2 digits, it must have a :, the first digit of seconds must be 0-5.*/}
-              {/*inputmode: hints to mobile devices what keyboard to show. In this case the normal "text" keyboard */}
-              {/* title: error message shown to the user when the pattern fails */}
+              <label htmlFor="duration">Duration</label>
               <input
+                id="duration"
                 type='text'
                 placeholder='2:30'
                 value={durationInput}
@@ -337,20 +327,15 @@ function Playlist() {
         </form>
       </div>
 
-      {/* SEARCH BAR */}
-
-      {/* <div className='search-bar'>
-        <input
-          type='search'
-          placeholder='Search your songs'
-        />
-      </div> */}
-
-      {/* PLAYLISTS */}
+      {/* PLAYLISTS SECTION */}
       <div>
         <div className="playlist-header">
           <div className="playlist-title">Your Playlists</div>
-          <button className='btn-new-playlist' onClick={() => setShowModal(true)}>
+          <button 
+            type="button"
+            className='btn-new-playlist' 
+            onClick={() => setShowModal(true)}
+          >
             + New Playlist
           </button>
         </div>
@@ -370,6 +355,7 @@ function Playlist() {
                 <div
                   className="playlist-card-header"
                   onClick={() => handleToggleExpand(pl.id)}
+                  style={{ cursor: 'pointer' }}
                 >
                   <div className="playlist-card-left">
                     <span className="playlist-card-arrow">
@@ -382,9 +368,10 @@ function Playlist() {
                       {pl.songs.length} {pl.songs.length === 1 ? 'song' : 'songs'}
                     </span>
                     <button
+                      type="button"
                       className="btn-delete-playlist"
                       onClick={(e) => {
-                        e.stopPropagation(); // prevents card from toggling when X is clicked
+                        e.stopPropagation();
                         handleDeletePlaylist(pl.id);
                       }}
                     >
@@ -400,13 +387,14 @@ function Playlist() {
                         No songs yet. Use the form above to add songs.
                       </div>
                     ) : (
-                      pl.songs.map((song, index) => (
-                        <div key={index} className="song-item">
+                      pl.songs.map((song) => (
+                        <div key={song.id} className="song-item">
                           <span className="song-item-title">{song.title}</span>
                           <span className="song-item-artist">{song.artist}</span>
                           <span className="song-item-duration">{song.duration}</span>
                           {song.preview && (
                             <button
+                              type="button"
                               className={`btn-preview ${currentlyPlaying === song.id ? 'playing' : ''}`}
                               onClick={() => handlePreview(song)}
                             >
@@ -422,7 +410,8 @@ function Playlist() {
             ))
           )}
         </div>
-        {/* MODAL */}
+
+        {/* CREATE PLAYLIST MODAL */}
         {showModal && (
           <div className='modal-overlay' onClick={() => setShowModal(false)}>
             <div className='modal' onClick={(e) => e.stopPropagation()}>
@@ -437,14 +426,25 @@ function Playlist() {
                 autoFocus
               />
               <div className='modal-actions'>
-                <button className='btn-cancel' onClick={() => setShowModal(false)}>Cancel</button>
-                <button className='btn-confirm' onClick={handleCreatePlaylist}>Create</button>
+                <button 
+                  type="button"
+                  className='btn-cancel' 
+                  onClick={() => setShowModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button"
+                  className='btn-confirm' 
+                  onClick={handleCreatePlaylist}
+                >
+                  Create
+                </button>
               </div>
             </div>
           </div>
         )}
       </div>
-
     </div>
   )
 }
