@@ -3,7 +3,7 @@ import { themes } from './themes';
 import { useState, useEffect, useRef } from 'react';
 
 function Playlist() {
-  // ============ STATE ============
+  //  STATE 
   const [playlists, setPlaylists] = useState([]);
   const [songInput, setSongInput] = useState('');
   const [artistInput, setArtistInput] = useState('');
@@ -15,9 +15,19 @@ function Playlist() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
+  
+  // SEARCH STATE
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState({ playlists: [], songs: [] });
+  const [selectedSongForPlaylistChoice, setSelectedSongForPlaylistChoice] = useState(null);
+  
+  // DELETE & UNDO STATE
+  const [deletedSongs, setDeletedSongs] = useState([]);
+  const [activeToast, setActiveToast] = useState(null);
+  
   const audioRef = useRef(null);
 
-  // ============ API CALLS ============
+  //  API CALLS 
   const fetchSongs = async (query) => {
     try {
       const res = await fetch(
@@ -31,7 +41,7 @@ function Playlist() {
     }
   };
 
-  // ============ THEME MANAGEMENT ============
+  //  THEME MANAGEMENT 
   const applyTheme = (themeName) => {
     const theme = themes[themeName];
     if (!theme) return;
@@ -44,7 +54,7 @@ function Playlist() {
     applyTheme('midnight');
   }, []);
 
-  // ============ PERSISTENT STORAGE (localStorage) ============
+  //  PERSISTENT STORAGE (localStorage) 
   // Load playlists on mount
   useEffect(() => {
     try {
@@ -69,7 +79,7 @@ function Playlist() {
     }
   }, [playlists]);
 
-  // ============ SEARCH & SUGGESTIONS (DEBOUNCED) ============
+  //  SEARCH & SUGGESTIONS (DEBOUNCED - iTunes autocomplete)
   useEffect(() => {
     if (songInput.length < 2) {
       setSuggestions([]);
@@ -84,7 +94,23 @@ function Playlist() {
     return () => clearTimeout(delay);
   }, [songInput]);
 
-  // ============ UTILITY FUNCTIONS ============
+  // SEARCH PLAYLISTS AND SONGS (DEBOUNCED - local search)
+  useEffect(() => {
+    if (searchQuery.length < 2) {
+      setSearchResults({ playlists: [], songs: [] });
+      return;
+    }
+
+    const delay = setTimeout(() => {
+      const results = performSearch(searchQuery, playlists);
+      setSearchResults(results);
+    }, 300);
+
+    return () => clearTimeout(delay);
+  }, [searchQuery, playlists]);
+
+
+  //  UTILITY FUNCTIONS 
   const secondsToMinuteSeconds = (totalSeconds) => {
     const m = Math.floor(totalSeconds / 60);
     const s = totalSeconds % 60;
@@ -100,7 +126,7 @@ function Playlist() {
     return `${s}s`;
   };
 
-  // ============ STATS (DERIVED FROM STATE) ============
+  //  STATS (DERIVED FROM STATE) 
   const totalPlaylists = playlists.length;
 
   const totalSongs = playlists.reduce(
@@ -116,11 +142,14 @@ function Playlist() {
     }, 0);
   }, 0);
 
-  // ============ SUGGESTION CLICK HANDLER ============
+
+  // ======HANDLERS=====
+
+  //  SUGGESTION CLICK HANDLER 
   const handleSuggestionClick = (suggestion) => {
     setSongInput(suggestion.trackName);
     setArtistInput(suggestion.artistName);
-    
+
     const durationSec = suggestion.trackTimeMillis
       ? Math.floor(suggestion.trackTimeMillis / 1000)
       : 0;
@@ -130,7 +159,7 @@ function Playlist() {
     setSuggestions([]);
   };
 
-  // ============ PLAYLIST CRUD ============
+  //  PLAYLIST CRUD 
   const handleCreatePlaylist = () => {
     if (!newPlaylistName.trim()) return;
 
@@ -153,7 +182,8 @@ function Playlist() {
     setExpandedPlaylistId(expandedPlaylistId === id ? null : id);
   };
 
-  // ============ ADD SONG HANDLER ============
+
+  //  ADD SONG HANDLER 
   const handleAddSong = (e) => {
     e.preventDefault();
 
@@ -162,10 +192,11 @@ function Playlist() {
 
     const newSong = {
       id: Date.now(),
-      title: songInput.trim(),
-      artist: artistInput.trim(),
+      trackName: songInput.trim(),
+      artistName: artistInput.trim(),
       duration: durationInput.trim(),
-      preview: previewUrl || null
+      previewUrl: previewUrl || null,
+      trackId: null  // manually added, not from iTunes
     };
 
     setPlaylists(playlists.map(pl =>
@@ -181,9 +212,9 @@ function Playlist() {
     setSuggestions([]);
   };
 
-  // ============ AUDIO PLAYBACK ============
+  //  AUDIO PLAYBACK 
   const handlePreview = (song) => {
-    if (!song.preview) return;
+    if (!song.previewUrl) return;
 
     if (currentlyPlaying === song.id) {
       if (audioRef.current) {
@@ -196,7 +227,7 @@ function Playlist() {
         audioRef.current.pause();
       }
 
-      const audio = new Audio(song.preview);
+      const audio = new Audio(song.previewUrl);
       audioRef.current = audio;
 
       audio.play().catch(() => {
@@ -208,7 +239,129 @@ function Playlist() {
     }
   };
 
-  // ============ RENDER ============
+  // ====== DELETE SONG HANDLERS ======
+
+  const handleDeleteSong = (playlistId, songId) => {
+    // 1. Find the song object
+    const playlist = playlists.find(pl => pl.id === playlistId);
+    const song = playlist.songs.find(s => s.id === songId);
+
+    if (!song) return;
+
+    // 2. Remove song from playlist
+    setPlaylists(playlists.map(pl =>
+      pl.id === playlistId
+        ? { ...pl, songs: pl.songs.filter(s => s.id !== songId) }
+        : pl
+    ));
+
+    // 3. Store deleted song in history
+    setDeletedSongs([...deletedSongs, { song, playlistId, deletedAt: Date.now() }]);
+
+    // 4. Show toast notification
+    setActiveToast({
+      message: `Deleted "${song.trackName}"`,
+      songId,
+      playlistId
+    });
+
+    // 5. Auto-dismiss toast after 3 seconds
+    const timeoutId = setTimeout(() => setActiveToast(null), 3000);
+
+    // Cleanup timeout if user manually closes or undoes
+    return () => clearTimeout(timeoutId);
+  };
+
+  const handleUndoDelete = (songId, playlistId) => {
+    // 1. Find the deleted song in history
+    const deletedEntry = deletedSongs.find(
+      d => d.song.id === songId && d.playlistId === playlistId
+    );
+
+    if (!deletedEntry) return;
+
+    // 2. Add song back to playlist
+    setPlaylists(playlists.map(pl =>
+      pl.id === playlistId
+        ? { ...pl, songs: [...pl.songs, deletedEntry.song] }
+        : pl
+    ));
+
+    // 3. Remove from deletion history
+    setDeletedSongs(deletedSongs.filter(d => d !== deletedEntry));
+
+    // 4. Close toast
+    setActiveToast(null);
+  };
+
+  // ====== SEARCH HANDLERS ======
+
+  const handleSearchPlaylistClick = (playlistId) => {
+    setExpandedPlaylistId(playlistId);
+    setSearchQuery('');
+  };
+
+  const handleSearchSongClick = (song) => {
+    if (song.playlists.length === 1) {
+      setExpandedPlaylistId(song.playlists[0].id);
+      setSearchQuery('');
+    } else {
+      setSelectedSongForPlaylistChoice(song);
+    }
+  };
+
+  const handlePlaylistChoice = (playlistId) => {
+    setExpandedPlaylistId(playlistId);
+    setSearchQuery('');
+    setSelectedSongForPlaylistChoice(null);
+  };
+
+  // ====== SEARCH LOGIC ======
+
+  function performSearch(query, playlists) {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return { playlists: [], songs: [] };
+    }
+
+    const matchedPlaylists = playlists.filter(pl =>
+      pl.name.toLowerCase().includes(normalizedQuery)
+    );
+
+    const songMap = new Map();
+
+    playlists.forEach(pl => {
+      pl.songs.forEach(song => {
+        const matches =
+          song.trackName.toLowerCase().includes(normalizedQuery) ||
+          song.artistName.toLowerCase().includes(normalizedQuery);
+
+        if (!matches) return;
+
+        if (!songMap.has(song.id)) {
+          songMap.set(song.id, {
+            ...song,
+            playlists: [{ id: pl.id, name: pl.name }]
+          });
+        } else {
+          songMap.get(song.id).playlists.push({
+            id: pl.id,
+            name: pl.name
+          });
+        }
+      });
+    });
+
+    return {
+      playlists: matchedPlaylists,
+      songs: Array.from(songMap.values())
+    };
+  }
+
+
+
+  //  RENDER 
   return (
     <div className='container'>
       {/* HEADER */}
@@ -223,6 +376,106 @@ function Playlist() {
           <option value='light'>Light</option>
         </select>
       </div>
+
+      {/* SEARCH BAR */}
+      <div className='search-bar-container'>
+        <input
+          type="text"
+          placeholder="Search your playlists or songs..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className='search-input'
+        />
+      </div>
+
+      {/* SEARCH RESULTS MODAL */}
+      {searchQuery.length >= 2 && (
+        <div className='modal-overlay' onClick={() => setSearchQuery('')}>
+          <div className='modal search-modal' onClick={(e) => e.stopPropagation()}>
+            <div className='modal-title'>Search Results</div>
+
+            {/* PLAYLISTS SECTION */}
+            {searchResults.playlists.length > 0 && (
+              <div className='search-section'>
+                <div className='search-section-title'>Playlists</div>
+                {searchResults.playlists.map(pl => (
+                  <div
+                    key={pl.id}
+                    className='search-result-item'
+                    onClick={() => handleSearchPlaylistClick(pl.id)}
+                  >
+                    <span className='search-result-name'>{pl.name}</span>
+                    <span className='search-result-meta'>{pl.songs.length} songs</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* SONGS SECTION */}
+            {searchResults.songs.length > 0 && (
+              <div className='search-section'>
+                <div className='search-section-title'>Songs</div>
+                {searchResults.songs.map(song => (
+                  <div key={song.id} className='search-result-item-song'>
+                    <div
+                      className='search-result-song-main'
+                      onClick={() => handleSearchSongClick(song)}
+                    >
+                      <span className='search-result-name'>{song.trackName}</span>
+                      <span className='search-result-meta'>{song.artistName}</span>
+                    </div>
+                    <div className='search-result-playlists'>
+                      {song.playlists.map(pl => (
+                        <span key={pl.id} className='playlist-badge'>{pl.name}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* PLAYLIST CHOICE SUB-MENU */}
+            {selectedSongForPlaylistChoice && (
+              <div className='playlist-choice-overlay' onClick={() => setSelectedSongForPlaylistChoice(null)}>
+                <div className='playlist-choice-menu' onClick={(e) => e.stopPropagation()}>
+                  <div className='choice-label'>Choose a playlist:</div>
+                  {selectedSongForPlaylistChoice.playlists.map(pl => (
+                    <button
+                      key={pl.id}
+                      type="button"
+                      className='choice-button'
+                      onClick={() => handlePlaylistChoice(pl.id)}
+                    >
+                      {pl.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* NO RESULTS STATE */}
+            {searchResults.playlists.length === 0 && searchResults.songs.length === 0 && (
+              <div className='search-no-results'>
+                No playlists or songs found.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TOAST NOTIFICATION - DELETE UNDO */}
+      {activeToast && (
+        <div className='toast-notification'>
+          <span className='toast-message'>{activeToast.message}</span>
+          <button
+            type="button"
+            className='btn-undo'
+            onClick={() => handleUndoDelete(activeToast.songId, activeToast.playlistId)}
+          >
+            Undo
+          </button>
+        </div>
+      )}
 
       {/* STATS */}
       <div className='stats'>
@@ -325,9 +578,9 @@ function Playlist() {
       <div>
         <div className="playlist-header">
           <div className="playlist-title">Your Playlists</div>
-          <button 
+          <button
             type="button"
-            className='btn-new-playlist' 
+            className='btn-new-playlist'
             onClick={() => setShowModal(true)}
           >
             + New Playlist
@@ -383,10 +636,10 @@ function Playlist() {
                     ) : (
                       pl.songs.map((song) => (
                         <div key={song.id} className="song-item">
-                          <span className="song-item-title">{song.title}</span>
-                          <span className="song-item-artist">{song.artist}</span>
+                          <span className="song-item-title">{song.trackName}</span>
+                          <span className="song-item-artist">{song.artistName}</span>
                           <span className="song-item-duration">{song.duration}</span>
-                          {song.preview && (
+                          {song.previewUrl && (
                             <button
                               type="button"
                               className={`btn-preview ${currentlyPlaying === song.id ? 'playing' : ''}`}
@@ -395,6 +648,14 @@ function Playlist() {
                               {currentlyPlaying === song.id ? '■' : '▶'}
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="btn-delete-song"
+                            onClick={() => handleDeleteSong(pl.id, song.id)}
+                            title="Delete song"
+                          >
+                            ✕
+                          </button>
                         </div>
                       ))
                     )}
@@ -420,16 +681,16 @@ function Playlist() {
                 autoFocus
               />
               <div className='modal-actions'>
-                <button 
+                <button
                   type="button"
-                  className='btn-cancel' 
+                  className='btn-cancel'
                   onClick={() => setShowModal(false)}
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="button"
-                  className='btn-confirm' 
+                  className='btn-confirm'
                   onClick={handleCreatePlaylist}
                 >
                   Create
